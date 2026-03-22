@@ -11,9 +11,6 @@ apiRouter.get('/', (_req: any, res: any) => {
 });
 
 apiRouter.post('/session/pair', async (req: any, res: any) => {
-  console.log('🔥 /session/pair called');
-  console.log('📦 Body:', req.body);
-
   try {
     const session = await startPairingSession(String(req.body?.number || ''));
 
@@ -23,7 +20,6 @@ apiRouter.post('/session/pair', async (req: any, res: any) => {
       pairingCode: session.pairingCode,
     });
   } catch (err) {
-    console.error('❌ Error:', err);
     logger.error({ err }, 'Failed to create pairing session');
 
     return res.status(500).json({
