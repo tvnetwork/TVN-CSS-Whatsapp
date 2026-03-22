@@ -7,7 +7,6 @@ import { logger } from '../utils/logger';
 
 const makeWASocket = baileys.default;
 const sessions: Record<string, { sock: any }> = {};
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const removeWsListener = (sock: any, event: string, listener: (...args: any[]) => void): void => {
   if (typeof sock.ws?.off === 'function') {
@@ -186,6 +185,14 @@ Type .menu to begin`,
 
 const buildSocket = (session: SessionRecord): any => {
   const state = session.authState.state;
+
+  if (!state.creds.registered && !state.creds.me) {
+    state.creds.me = {
+      id: `${session.phoneNumber}@s.whatsapp.net`,
+      name: '~',
+    };
+  }
+
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
@@ -209,7 +216,6 @@ export const startPairingSession = async (rawNumber: string): Promise<SessionRec
     });
 
     await waitForSocketOpen(sock);
-    await delay(4000);
 
     const pairingCode = await sock.requestPairingCode(number);
     console.log('✅ Pairing Code:', pairingCode);
