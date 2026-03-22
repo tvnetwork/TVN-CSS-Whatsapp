@@ -11,7 +11,7 @@
     "node": "20.x"
   },
   "dependencies": {
-    "next": "15.2.2",
+    "next": "15.2.6",
     "qrcode": "^1.5.4",
     "react": "19.0.0",
     "react-dom": "19.0.0"
