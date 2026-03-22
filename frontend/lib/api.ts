@@ -1,75 +1,82 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '';
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://tvn-css-whatsapp.onrender.com';
+
+console.log('API:', API_BASE);
 
 const buildUrl = (path: string): string => {
-  if (!API_BASE) {
-    throw new Error('NEXT_PUBLIC_API_BASE is not configured');
-  }
-
   return `${API_BASE.replace(/\/$/, '')}${path}`;
 };
 
-export interface CreateSessionResponse {
+export interface PairSessionResponse {
   sessionId: string;
   publicCode: string;
-  status: string;
-  createdAt: string;
+  pairingCode: string;
 }
 
 export interface SessionResponse {
   sessionId: string;
   publicCode: string;
+  pairingCode: string | null;
   status: 'connecting' | 'connected' | 'disconnected';
-  qr: string | null;
   createdAt: string;
 }
 
-export const createSession = async (): Promise<CreateSessionResponse> => {
-  const response = await fetch(buildUrl('/session/create'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
+export interface SessionStatusResponse {
+  status: SessionResponse['status'];
+}
 
-  if (!response.ok) {
-    throw new Error('Unable to create session');
+export const createPairSession = async (phoneNumber: string): Promise<PairSessionResponse> => {
+  console.log('Sending number:', phoneNumber);
+
+  try {
+    const response = await fetch(`${API_BASE}/session/pair`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        number: phoneNumber.replace('+', ''),
+      }),
+    });
+
+    const data = (await response.json().catch(() => null)) as
+      | (PairSessionResponse & { error?: string; message?: string })
+      | null;
+
+    console.log('Response:', data);
+
+    if (!response.ok || !data?.pairingCode || !data?.sessionId) {
+      throw new Error(data?.message || data?.error || 'Failed to connect to server');
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Fetch error:', err);
+    throw new Error('Failed to connect to server');
   }
-
-  return response.json() as Promise<CreateSessionResponse>;
 };
 
-export const fetchSessionQr = async (sessionId: string): Promise<SessionResponse> => {
-  const response = await fetch(buildUrl(`/session/${sessionId}/qr`), {
+export const fetchSession = async (sessionId: string): Promise<SessionResponse> => {
+  const response = await fetch(buildUrl(`/session/${sessionId}`), {
     method: 'GET',
     cache: 'no-store',
   });
 
   if (!response.ok) {
-    throw new Error('Unable to fetch session QR');
+    throw new Error('Failed to connect to server');
   }
 
   return response.json() as Promise<SessionResponse>;
 };
 
-export const fetchSessionStatus = async (sessionId: string): Promise<SessionResponse> => {
+export const fetchSessionStatus = async (sessionId: string): Promise<SessionStatusResponse> => {
   const response = await fetch(buildUrl(`/session/${sessionId}/status`), {
     method: 'GET',
     cache: 'no-store',
   });
 
   if (!response.ok) {
-    throw new Error('Unable to fetch session status');
+    throw new Error('Failed to connect to server');
   }
 
-  return response.json() as Promise<SessionResponse>;
-};
-
-export const deleteSession = async (sessionId: string): Promise<void> => {
-  const response = await fetch(buildUrl(`/session/${sessionId}`), {
-    method: 'DELETE',
-  });
-
-  if (!response.ok) {
-    throw new Error('Unable to delete session');
-  }
+  return response.json() as Promise<SessionStatusResponse>;
 };

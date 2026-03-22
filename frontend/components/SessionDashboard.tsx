@@ -1,37 +1,40 @@
 'use client';
 
 import Link from 'next/link';
-import QRCode from 'qrcode';
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
-import { deleteSession, fetchSessionQr, fetchSessionStatus, type SessionResponse } from '../lib/api';
+import { fetchSession, fetchSessionStatus, type SessionResponse } from '../lib/api';
 
-interface SessionDashboardProps {
-  sessionId: string;
-}
+const getStatusLabel = (status: SessionResponse['status'], loading: boolean): string => {
+  if (loading) {
+    return 'Generating...';
+  }
 
-const statusClassMap: Record<SessionResponse['status'], string> = {
-  connecting: 'status-pill status-connecting',
-  connected: 'status-pill status-connected',
-  disconnected: 'status-pill status-disconnected',
+  if (status === 'connected') {
+    return 'Connected ✅';
+  }
+
+  if (status === 'disconnected') {
+    return 'Failed to connect to server';
+  }
+
+  return 'Waiting for connection...';
 };
 
-export function SessionDashboard({ sessionId }: SessionDashboardProps) {
-  const router = useRouter();
+export function SessionDashboard({ sessionId }: { sessionId: string }) {
   const [session, setSession] = useState<SessionResponse | null>(null);
-  const [qrImage, setQrImage] = useState<string | null>(null);
+  const [status, setStatus] = useState<SessionResponse['status']>('connecting');
   const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
 
   useEffect(() => {
     let active = true;
 
     const syncSession = async () => {
       try {
-        const [qrData, statusData] = await Promise.all([
-          fetchSessionQr(sessionId),
+        const [details, statusResponse] = await Promise.all([
+          fetchSession(sessionId),
           fetchSessionStatus(sessionId),
         ]);
 
@@ -39,29 +42,17 @@ export function SessionDashboard({ sessionId }: SessionDashboardProps) {
           return;
         }
 
-        const merged: SessionResponse = {
-          ...statusData,
-          qr: qrData.qr,
-        };
-
-        setSession(merged);
+        setSession({
+          ...details,
+          status: statusResponse.status,
+        });
+        setStatus(statusResponse.status);
         setError(null);
-
-        if (merged.qr) {
-          const dataUrl = await QRCode.toDataURL(merged.qr, {
-            margin: 1,
-            width: 320,
-          });
-
-          if (active) {
-            setQrImage(dataUrl);
-          }
-        } else if (active) {
-          setQrImage(null);
-        }
       } catch (err) {
+        console.error('Fetch error:', err);
         if (active) {
-          setError(err instanceof Error ? err.message : 'Unable to load session');
+          setError('Failed to connect to server');
+          setStatus('disconnected');
         }
       } finally {
         if (active) {
@@ -71,81 +62,97 @@ export function SessionDashboard({ sessionId }: SessionDashboardProps) {
     };
 
     void syncSession();
-    const interval = window.setInterval(() => {
+    const timer = window.setInterval(() => {
       void syncSession();
-    }, 2000);
+    }, 2500);
 
     return () => {
       active = false;
-      window.clearInterval(interval);
+      window.clearInterval(timer);
     };
   }, [sessionId]);
 
-  const statusClassName = useMemo(() => {
-    return session ? statusClassMap[session.status] : statusClassMap.connecting;
-  }, [session]);
+  const statusLabel = useMemo(() => {
+    return getStatusLabel(status, loading);
+  }, [loading, status]);
 
-  const handleDelete = async () => {
+  const handleCopy = async () => {
+    if (!session?.pairingCode) {
+      return;
+    }
+
     try {
-      setDeleting(true);
-      setError(null);
-      await deleteSession(sessionId);
-      router.push('/');
-      router.refresh();
+      await navigator.clipboard.writeText(session.pairingCode);
+      setCopyState('copied');
+      window.setTimeout(() => setCopyState('idle'), 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to delete session');
-    } finally {
-      setDeleting(false);
+      console.error('Fetch error:', err);
+      setError('Failed to connect to server');
     }
   };
 
   return (
-    <section className="panel stack">
-      <div className="button-row">
-        <Link className="button-secondary" href="/">
-          Back Home
-        </Link>
-        <button className="button-danger" disabled={deleting} onClick={handleDelete} type="button">
-          {deleting ? 'Deleting...' : 'Delete Session'}
-        </button>
-      </div>
-
-      <div className="stack center-text">
-        <p className="helper-text">Session Monitor</p>
-        <h1 className="heading">{sessionId}</h1>
-        <p className="subheading">
-          QR code refreshes automatically every 2 seconds until the WhatsApp session is connected.
-        </p>
-      </div>
-
-      {error ? <div className="error-banner">{error}</div> : null}
-
-      <div className="center-text">
-        <span className={statusClassName}>{session?.status || 'connecting'}</span>
-      </div>
-
-      <div className="qr-frame">
-        {loading ? (
-          <p className="helper-text">Loading QR code...</p>
-        ) : qrImage ? (
-          <img alt="WhatsApp session QR code" src={qrImage} />
-        ) : (
-          <p className="helper-text center-text">
-            {session?.status === 'connected'
-              ? 'Session connected successfully.'
-              : 'Waiting for a fresh QR code from the backend.'}
-          </p>
-        )}
-      </div>
-
-      <div className="info-grid">
-        <div className="info-card">
-          <span className="label">Public Code</span>
-          <p className="value">{session?.publicCode || 'Loading...'}</p>
+    <section className="w-full max-w-2xl rounded-[32px] border border-white/10 bg-white/10 p-6 shadow-glow backdrop-blur-xl transition-all duration-300 sm:p-8">
+      <div className="space-y-8">
+        <div className="flex items-center justify-between gap-4">
+          <Link
+            className="inline-flex rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition duration-200 hover:bg-white/20"
+            href="/"
+          >
+            Back
+          </Link>
+          <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-cyan-200">
+            Live Pairing
+          </span>
         </div>
-        <div className="info-card">
-          <span className="label">Created At</span>
-          <p className="value">{session?.createdAt ? new Date(session.createdAt).toLocaleString() : 'Loading...'}</p>
+
+        <header className="space-y-3 text-center">
+          <h1 className="text-3xl font-bold tracking-tight text-white sm:text-5xl">TVN WhatsApp Pairing</h1>
+          <p className="text-sm text-slate-300 sm:text-base">Connect your WhatsApp instantly</p>
+        </header>
+
+        <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-5 text-center">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Status</p>
+          <p className="mt-3 text-lg font-semibold text-white">{statusLabel}</p>
+        </div>
+
+        {error ? <p className="text-center text-sm font-medium text-red-300">{error}</p> : null}
+
+        <div className="space-y-6 rounded-3xl border border-cyan-300/20 bg-slate-950/50 p-5">
+          <div className="space-y-3 text-center">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Pairing Code</p>
+            <p className="text-4xl font-black tracking-[0.35em] text-white sm:text-5xl">
+              {session?.pairingCode || '---- ----'}
+            </p>
+            <button
+              className="inline-flex rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition duration-200 hover:bg-white/20"
+              onClick={handleCopy}
+              type="button"
+            >
+              {copyState === 'copied' ? 'Copied!' : 'Copy Code'}
+            </button>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Instructions</p>
+            <ol className="mt-3 space-y-2 text-sm text-slate-200">
+              <li>1. Open WhatsApp</li>
+              <li>2. Linked Devices</li>
+              <li>3. Link with code</li>
+              <li>4. Enter code</li>
+            </ol>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Session ID</p>
+              <p className="mt-2 break-all text-sm font-medium text-white">{session?.sessionId || sessionId}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Public Code</p>
+              <p className="mt-2 break-all text-sm font-medium text-white">{session?.publicCode || 'Loading...'}</p>
+            </div>
+          </div>
         </div>
       </div>
     </section>

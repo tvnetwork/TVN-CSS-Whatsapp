@@ -1,50 +1,12 @@
 const baileys = require('@whiskeysockets/baileys');
-const Boom = require('@hapi/boom');
 
+import type { SessionRecord } from '../sessions/types';
 import { sessionManager } from '../sessions/session-manager';
+import { normalizePhoneNumber } from '../utils/phone';
 import { logger } from '../utils/logger';
 
 const makeWASocket = baileys.default;
-const Browsers = baileys.Browsers;
-const DisconnectReason = baileys.DisconnectReason;
-const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
 const jidNormalizedUser = baileys.jidNormalizedUser;
-
-const reconnectTimers = new Map<string, NodeJS.Timeout>();
-const reconnectAttempts = new Map<string, number>();
-
-const reconnectableReasons = new Set<number>([
-  DisconnectReason.connectionClosed,
-  DisconnectReason.connectionLost,
-  DisconnectReason.connectionReplaced,
-  DisconnectReason.restartRequired,
-  DisconnectReason.timedOut,
-  DisconnectReason.multideviceMismatch,
-]);
-
-const getReconnectDelay = (attempt: number): number => {
-  return Math.min(30000, 2000 * Math.max(attempt, 1));
-};
-
-const shouldReconnect = (statusCode?: number): boolean => {
-  if (!statusCode) {
-    return true;
-  }
-
-  if (statusCode === DisconnectReason.loggedOut) {
-    return false;
-  }
-
-  return reconnectableReasons.has(statusCode);
-};
-
-const clearReconnectTimer = (sessionId: string): void => {
-  const timer = reconnectTimers.get(sessionId);
-  if (timer) {
-    clearTimeout(timer);
-    reconnectTimers.delete(sessionId);
-  }
-};
 
 const sendConnectionMessage = async (sessionId: string): Promise<void> => {
   const session = sessionManager.getSession(sessionId);
@@ -58,125 +20,81 @@ const sendConnectionMessage = async (sessionId: string): Promise<void> => {
   });
 };
 
-const scheduleReconnect = (sessionId: string, statusCode?: number): void => {
-  clearReconnectTimer(sessionId);
+const attachConnectionHandlers = (sessionId: string, sock: any, saveCreds: () => Promise<void>): void => {
+  sock.ev.on('creds.update', saveCreds);
 
-  if (!shouldReconnect(statusCode)) {
-    logger.info({ sessionId, statusCode }, 'Reconnect skipped');
-    return;
-  }
-
-  const attempt = (reconnectAttempts.get(sessionId) || 0) + 1;
-  reconnectAttempts.set(sessionId, attempt);
-  const delay = getReconnectDelay(attempt);
-
-  const timer = setTimeout(() => {
-    reconnectTimers.delete(sessionId);
-    void startSession(sessionId);
-  }, delay);
-
-  reconnectTimers.set(sessionId, timer);
-  logger.info({ sessionId, attempt, delay, statusCode }, 'Reconnect scheduled');
-};
-
-export const startSession = async (sessionId: string): Promise<void> => {
-  const session = sessionManager.getSession(sessionId);
-  if (!session) {
-    throw new Error(`Session ${sessionId} not found`);
-  }
-
-  clearReconnectTimer(sessionId);
-
-  if (session.socket) {
+  sock.ev.on('connection.update', async (update: any) => {
     try {
-      session.socket.ev.removeAllListeners('connection.update');
-      session.socket.ev.removeAllListeners('creds.update');
-      if (typeof session.socket.end === 'function') {
-        session.socket.end(new Error('Refreshing session socket'));
+      const connection = update?.connection;
+
+      if (connection === 'open') {
+        sessionManager.updateSession(sessionId, {
+          status: 'connected',
+          socket: sock,
+        });
+        await sendConnectionMessage(sessionId);
+        return;
+      }
+
+      if (connection === 'close') {
+        sessionManager.updateSession(sessionId, {
+          status: 'disconnected',
+          socket: null,
+        });
       }
     } catch (error) {
-      logger.warn({ err: error, sessionId }, 'Failed to close previous socket');
+      logger.error({ err: error, sessionId }, 'Failed while handling connection update');
+      sessionManager.updateSession(sessionId, {
+        status: 'disconnected',
+      });
     }
-  }
+  });
+};
 
-  sessionManager.updateSession(sessionId, {
-    status: 'connecting',
-    qr: null,
-    socket: null,
+const buildSocket = (session: SessionRecord): any => {
+  const state = session.authState.state;
+  const sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: false,
+    markOnlineOnConnect: false,
+    logger,
   });
 
+  attachConnectionHandlers(session.sessionId, sock, session.authState.saveCreds);
+  return sock;
+};
+
+export const startPairingSession = async (rawNumber: string): Promise<SessionRecord> => {
+  const number = normalizePhoneNumber(rawNumber);
+  const session = sessionManager.createSession(number);
+
   try {
-    const versionData = await fetchLatestBaileysVersion();
-    const socket = makeWASocket({
-      version: versionData.version,
-      auth: session.authState.state,
-      browser: Browsers.ubuntu('TVN CSS Engine'),
-      printQRInTerminal: false,
-      markOnlineOnConnect: false,
-      syncFullHistory: false,
-      generateHighQualityLinkPreview: false,
-      defaultQueryTimeoutMs: 60000,
-      connectTimeoutMs: 60000,
-      keepAliveIntervalMs: 25000,
-      logger,
+    const sock = buildSocket(session);
+    sessionManager.updateSession(session.sessionId, {
+      socket: sock,
+      status: 'connecting',
     });
 
-    sessionManager.updateSession(sessionId, { socket, qr: null, status: 'connecting' });
+    const pairingCode = await sock.requestPairingCode(number);
+    console.log('✅ Pairing Code:', pairingCode);
 
-    socket.ev.on('creds.update', async () => {
-      try {
-        await session.authState.saveCreds();
-      } catch (error) {
-        logger.error({ err: error, sessionId }, 'Failed to save credentials');
-      }
+    const nextSession = sessionManager.updateSession(session.sessionId, {
+      pairingCode,
+      socket: sock,
+      status: 'connecting',
     });
 
-    socket.ev.on('connection.update', async (update: any) => {
-      try {
-        const connection = update?.connection;
-        const qr = update?.qr;
-        const lastDisconnect = update?.lastDisconnect;
+    if (!nextSession) {
+      throw new Error('Unable to store session');
+    }
 
-        if (qr) {
-          sessionManager.updateSession(sessionId, { qr, status: 'connecting' });
-          logger.info({ sessionId }, 'QR generated');
-        }
-
-        if (connection === 'open') {
-          reconnectAttempts.delete(sessionId);
-          clearReconnectTimer(sessionId);
-          sessionManager.updateSession(sessionId, {
-            status: 'connected',
-            qr: null,
-          });
-          logger.info({ sessionId }, 'Session connected');
-
-          try {
-            await sendConnectionMessage(sessionId);
-          } catch (error) {
-            logger.error({ err: error, sessionId }, 'Failed to send confirmation message');
-          }
-        }
-
-        if (connection === 'close') {
-          const statusCode = new Boom.Boom(lastDisconnect?.error)?.output?.statusCode;
-          sessionManager.updateSession(sessionId, {
-            status: 'disconnected',
-            socket: null,
-          });
-          logger.warn({ sessionId, statusCode }, 'Session disconnected');
-          scheduleReconnect(sessionId, statusCode);
-        }
-      } catch (error) {
-        logger.error({ err: error, sessionId }, 'Failed while handling connection update');
-      }
-    });
+    return nextSession;
   } catch (error) {
-    sessionManager.updateSession(sessionId, {
+    logger.error({ err: error, sessionId: session.sessionId }, 'Pairing session failed');
+    sessionManager.updateSession(session.sessionId, {
       status: 'disconnected',
       socket: null,
     });
-    logger.error({ err: error, sessionId }, 'Failed to start WhatsApp session');
-    scheduleReconnect(sessionId);
+    throw error;
   }
 };

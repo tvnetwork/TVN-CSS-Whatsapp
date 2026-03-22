@@ -7,7 +7,7 @@ class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly publicCodes = new Set<string>();
 
-  createSession(): SessionRecord {
+  createSession(phoneNumber: string): SessionRecord {
     let sessionId = createSessionId();
     while (this.sessions.has(sessionId)) {
       sessionId = createSessionId();
@@ -21,9 +21,10 @@ class SessionManager {
     const session: SessionRecord = {
       sessionId,
       publicCode,
+      phoneNumber,
       authState: createInMemoryAuthState(),
       socket: null,
-      qr: null,
+      pairingCode: null,
       status: 'connecting',
       createdAt: new Date().toISOString(),
     };
@@ -31,7 +32,7 @@ class SessionManager {
     this.sessions.set(sessionId, session);
     this.publicCodes.add(publicCode);
 
-    logger.info({ sessionId, publicCode }, 'Session created');
+    logger.info({ sessionId, publicCode, phoneNumber }, 'Session created');
 
     return session;
   }
@@ -53,31 +54,6 @@ class SessionManager {
 
   setStatus(sessionId: string, status: SessionStatus): SessionRecord | undefined {
     return this.updateSession(sessionId, { status });
-  }
-
-  async deleteSession(sessionId: string): Promise<boolean> {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      return false;
-    }
-
-    if (session.socket) {
-      try {
-        session.socket.ev.removeAllListeners('connection.update');
-        session.socket.ev.removeAllListeners('creds.update');
-        if (typeof session.socket.end === 'function') {
-          session.socket.end(new Error('Session deleted'));
-        }
-      } catch (error) {
-        logger.warn({ err: error, sessionId }, 'Failed to shut down socket while deleting session');
-      }
-    }
-
-    this.sessions.delete(sessionId);
-    this.publicCodes.delete(session.publicCode);
-    logger.info({ sessionId }, 'Session deleted');
-
-    return true;
   }
 }
 

@@ -20,9 +20,10 @@ export interface CustomAuthState {
 export interface SessionRecord {
   sessionId: string;
   publicCode: string;
+  phoneNumber: string;
   authState: CustomAuthState;
   socket: any | null;
-  qr: string | null;
+  pairingCode: string | null;
   status: SessionStatus;
   createdAt: string;
 }

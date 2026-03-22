@@ -11,8 +11,7 @@
     "node": "20.x"
   },
   "dependencies": {
-    "next": "15.2.2",
-    "qrcode": "^1.5.4",
+    "next": "15.2.6",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },
@@ -20,6 +19,9 @@
     "@types/node": "^22.13.14",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5.8.2"
   }
 }
