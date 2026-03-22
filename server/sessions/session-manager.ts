@@ -7,7 +7,7 @@ class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly publicCodes = new Set<string>();
 
-  createSession(): SessionRecord {
+  createSession(phoneNumber: string): SessionRecord {
     let sessionId = createSessionId();
     while (this.sessions.has(sessionId)) {
       sessionId = createSessionId();
@@ -21,9 +21,11 @@ class SessionManager {
     const session: SessionRecord = {
       sessionId,
       publicCode,
+      phoneNumber,
       authState: createInMemoryAuthState(),
       socket: null,
       qr: null,
+      pairingCode: null,
       status: 'connecting',
       createdAt: new Date().toISOString(),
     };
@@ -31,7 +33,7 @@ class SessionManager {
     this.sessions.set(sessionId, session);
     this.publicCodes.add(publicCode);
 
-    logger.info({ sessionId, publicCode }, 'Session created');
+    logger.info({ sessionId, publicCode, phoneNumber }, 'Session created');
 
     return session;
   }

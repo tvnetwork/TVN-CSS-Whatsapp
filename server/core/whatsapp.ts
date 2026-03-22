@@ -1,7 +1,9 @@
 const baileys = require('@whiskeysockets/baileys');
 const Boom = require('@hapi/boom');
 
+import type { SessionRecord } from '../sessions/types';
 import { sessionManager } from '../sessions/session-manager';
+import { normalizePhoneNumber } from '../utils/phone';
 import { logger } from '../utils/logger';
 
 const makeWASocket = baileys.default;
@@ -46,6 +48,26 @@ const clearReconnectTimer = (sessionId: string): void => {
   }
 };
 
+const closeExistingSocket = (sessionId: string, session: SessionRecord): void => {
+  if (!session.socket) {
+    return;
+  }
+
+  try {
+    session.socket.ev.removeAllListeners('connection.update');
+    session.socket.ev.removeAllListeners('creds.update');
+    if (typeof session.socket.end === 'function') {
+      session.socket.end(new Error('Refreshing session socket'));
+    }
+  } catch (error) {
+    logger.warn({ err: error, sessionId }, 'Failed to close previous socket');
+  }
+};
+
+const hasRegisteredCreds = (session: SessionRecord): boolean => {
+  return Boolean((session.authState.storage.creds as { registered?: boolean }).registered);
+};
+
 const sendConnectionMessage = async (sessionId: string): Promise<void> => {
   const session = sessionManager.getSession(sessionId);
   if (!session?.socket?.user?.id) {
@@ -72,36 +94,81 @@ const scheduleReconnect = (sessionId: string, statusCode?: number): void => {
 
   const timer = setTimeout(() => {
     reconnectTimers.delete(sessionId);
-    void startSession(sessionId);
+    const session = sessionManager.getSession(sessionId);
+    if (!session) {
+      return;
+    }
+
+    void initializeSession(sessionId, {
+      requestPairingCode: !hasRegisteredCreds(session),
+    });
   }, delay);
 
   reconnectTimers.set(sessionId, timer);
   logger.info({ sessionId, attempt, delay, statusCode }, 'Reconnect scheduled');
 };
 
-export const startSession = async (sessionId: string): Promise<void> => {
+const getDisconnectStatusCode = (lastDisconnect: any): number | undefined => {
+  const error = lastDisconnect?.error;
+  if (!error) {
+    return undefined;
+  }
+
+  if (error?.output?.statusCode) {
+    return error.output.statusCode;
+  }
+
+  try {
+    return new Boom.Boom(error).output.statusCode;
+  } catch (_error) {
+    return undefined;
+  }
+};
+
+const requestPairingCodeForSession = async (sessionId: string): Promise<string> => {
+  const session = sessionManager.getSession(sessionId);
+  if (!session?.socket) {
+    throw new Error('Socket not ready for pairing');
+  }
+
+  try {
+    const pairingCode = await session.socket.requestPairingCode(session.phoneNumber);
+    sessionManager.updateSession(sessionId, {
+      pairingCode,
+      status: 'connecting',
+    });
+    logger.info({ sessionId, phoneNumber: session.phoneNumber }, 'Pairing code generated');
+    return pairingCode;
+  } catch (error) {
+    sessionManager.updateSession(sessionId, {
+      socket: null,
+      status: 'disconnected',
+    });
+    logger.error({ err: error, sessionId }, 'Failed to request pairing code');
+    throw new Error('Unable to generate pairing code');
+  }
+};
+
+interface InitializeSessionOptions {
+  requestPairingCode: boolean;
+}
+
+export const initializeSession = async (
+  sessionId: string,
+  options: InitializeSessionOptions,
+): Promise<SessionRecord> => {
   const session = sessionManager.getSession(sessionId);
   if (!session) {
     throw new Error(`Session ${sessionId} not found`);
   }
 
   clearReconnectTimer(sessionId);
-
-  if (session.socket) {
-    try {
-      session.socket.ev.removeAllListeners('connection.update');
-      session.socket.ev.removeAllListeners('creds.update');
-      if (typeof session.socket.end === 'function') {
-        session.socket.end(new Error('Refreshing session socket'));
-      }
-    } catch (error) {
-      logger.warn({ err: error, sessionId }, 'Failed to close previous socket');
-    }
-  }
+  closeExistingSocket(sessionId, session);
 
   sessionManager.updateSession(sessionId, {
     status: 'connecting',
     qr: null,
+    pairingCode: options.requestPairingCode ? null : session.pairingCode,
     socket: null,
   });
 
@@ -121,7 +188,11 @@ export const startSession = async (sessionId: string): Promise<void> => {
       logger,
     });
 
-    sessionManager.updateSession(sessionId, { socket, qr: null, status: 'connecting' });
+    sessionManager.updateSession(sessionId, {
+      socket,
+      qr: null,
+      status: 'connecting',
+    });
 
     socket.ev.on('creds.update', async () => {
       try {
@@ -159,7 +230,7 @@ export const startSession = async (sessionId: string): Promise<void> => {
         }
 
         if (connection === 'close') {
-          const statusCode = new Boom.Boom(lastDisconnect?.error)?.output?.statusCode;
+          const statusCode = getDisconnectStatusCode(lastDisconnect);
           sessionManager.updateSession(sessionId, {
             status: 'disconnected',
             socket: null,
@@ -171,6 +242,12 @@ export const startSession = async (sessionId: string): Promise<void> => {
         logger.error({ err: error, sessionId }, 'Failed while handling connection update');
       }
     });
+
+    if (options.requestPairingCode && !hasRegisteredCreds(session)) {
+      await requestPairingCodeForSession(sessionId);
+    }
+
+    return sessionManager.getSession(sessionId) || session;
   } catch (error) {
     sessionManager.updateSession(sessionId, {
       status: 'disconnected',
@@ -178,5 +255,26 @@ export const startSession = async (sessionId: string): Promise<void> => {
     });
     logger.error({ err: error, sessionId }, 'Failed to start WhatsApp session');
     scheduleReconnect(sessionId);
+    throw error;
+  }
+};
+
+export const startPairingSession = async (number: string): Promise<SessionRecord> => {
+  const phoneNumber = normalizePhoneNumber(number);
+  const session = sessionManager.createSession(phoneNumber);
+
+  try {
+    const initializedSession = await initializeSession(session.sessionId, {
+      requestPairingCode: true,
+    });
+
+    if (!initializedSession.pairingCode) {
+      throw new Error('Unable to generate pairing code');
+    }
+
+    return initializedSession;
+  } catch (error) {
+    await sessionManager.deleteSession(session.sessionId);
+    throw error;
   }
 };

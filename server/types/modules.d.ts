@@ -35,3 +35,8 @@ declare module '@hapi/boom' {
   const boom: any;
   export = boom;
 }
+
+declare module 'cors' {
+  const cors: any;
+  export = cors;
+}

@@ -1,11 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import QRCode from 'qrcode';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { deleteSession, fetchSessionQr, fetchSessionStatus, type SessionResponse } from '../lib/api';
+import { deleteSession, fetchSession, fetchSessionStatus, type SessionResponse } from '../lib/api';
 
 interface SessionDashboardProps {
   sessionId: string;
@@ -20,7 +19,6 @@ const statusClassMap: Record<SessionResponse['status'], string> = {
 export function SessionDashboard({ sessionId }: SessionDashboardProps) {
   const router = useRouter();
   const [session, setSession] = useState<SessionResponse | null>(null);
-  const [qrImage, setQrImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,8 +28,8 @@ export function SessionDashboard({ sessionId }: SessionDashboardProps) {
 
     const syncSession = async () => {
       try {
-        const [qrData, statusData] = await Promise.all([
-          fetchSessionQr(sessionId),
+        const [details, status] = await Promise.all([
+          fetchSession(sessionId),
           fetchSessionStatus(sessionId),
         ]);
 
@@ -39,26 +37,11 @@ export function SessionDashboard({ sessionId }: SessionDashboardProps) {
           return;
         }
 
-        const merged: SessionResponse = {
-          ...statusData,
-          qr: qrData.qr,
-        };
-
-        setSession(merged);
+        setSession({
+          ...details,
+          status: status.status,
+        });
         setError(null);
-
-        if (merged.qr) {
-          const dataUrl = await QRCode.toDataURL(merged.qr, {
-            margin: 1,
-            width: 320,
-          });
-
-          if (active) {
-            setQrImage(dataUrl);
-          }
-        } else if (active) {
-          setQrImage(null);
-        }
       } catch (err) {
         if (active) {
           setError(err instanceof Error ? err.message : 'Unable to load session');
@@ -73,7 +56,7 @@ export function SessionDashboard({ sessionId }: SessionDashboardProps) {
     void syncSession();
     const interval = window.setInterval(() => {
       void syncSession();
-    }, 2000);
+    }, 2500);
 
     return () => {
       active = false;
@@ -100,8 +83,8 @@ export function SessionDashboard({ sessionId }: SessionDashboardProps) {
   };
 
   return (
-    <section className="panel stack">
-      <div className="button-row">
+    <section className="panel stack panel-lg">
+      <div className="button-row button-row-spread">
         <Link className="button-secondary" href="/">
           Back Home
         </Link>
@@ -111,37 +94,46 @@ export function SessionDashboard({ sessionId }: SessionDashboardProps) {
       </div>
 
       <div className="stack center-text">
-        <p className="helper-text">Session Monitor</p>
-        <h1 className="heading">{sessionId}</h1>
+        <p className="helper-text">Live Session Monitor</p>
+        <h1 className="heading">{session?.publicCode || sessionId}</h1>
         <p className="subheading">
-          QR code refreshes automatically every 2 seconds until the WhatsApp session is connected.
+          Enter the pairing code below inside WhatsApp Linked Devices. Status updates every 2.5 seconds.
         </p>
       </div>
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      <div className="center-text">
-        <span className={statusClassName}>{session?.status || 'connecting'}</span>
+      <div className="info-card info-card-highlight center-text stack">
+        <span className="label">Connection Status</span>
+        <div>
+          <span className={statusClassName}>
+            {session?.status === 'connected'
+              ? 'Connected ✅'
+              : session?.status === 'disconnected'
+                ? 'Disconnected'
+                : 'Connecting...'}
+          </span>
+        </div>
+        <p className="instruction-text">Go to WhatsApp → Linked Devices → Enter Code</p>
       </div>
 
-      <div className="qr-frame">
-        {loading ? (
-          <p className="helper-text">Loading QR code...</p>
-        ) : qrImage ? (
-          <img alt="WhatsApp session QR code" src={qrImage} />
-        ) : (
-          <p className="helper-text center-text">
-            {session?.status === 'connected'
-              ? 'Session connected successfully.'
-              : 'Waiting for a fresh QR code from the backend.'}
-          </p>
-        )}
+      <div className="pair-code-card center-text">
+        <span className="label">Pairing Code</span>
+        <p className="pair-code-value">{loading ? 'Loading...' : session?.pairingCode || 'Pending...'}</p>
       </div>
 
       <div className="info-grid">
         <div className="info-card">
+          <span className="label">Session ID</span>
+          <p className="value">{session?.sessionId || sessionId}</p>
+        </div>
+        <div className="info-card">
           <span className="label">Public Code</span>
           <p className="value">{session?.publicCode || 'Loading...'}</p>
+        </div>
+        <div className="info-card">
+          <span className="label">Phone Number</span>
+          <p className="value">{session?.phoneNumber || 'Loading...'}</p>
         </div>
         <div className="info-card">
           <span className="label">Created At</span>

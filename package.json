@@ -17,12 +17,14 @@
     "@whiskeysockets/baileys": "^6.7.19",
     "express": "^4.21.2",
     "nanoid": "^3.3.4",
-    "pino": "^9.7.0"
+    "pino": "^9.7.0",
+    "cors": "^2.8.5"
   },
   "devDependencies": {
     "@types/express": "^5.0.1",
     "@types/node": "^22.13.14",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "@types/cors": "^2.8.17"
   }
 }

@@ -8,50 +8,56 @@ const buildUrl = (path: string): string => {
   return `${API_BASE.replace(/\/$/, '')}${path}`;
 };
 
-export interface CreateSessionResponse {
+export interface PairSessionResponse {
   sessionId: string;
   publicCode: string;
-  status: string;
-  createdAt: string;
+  pairingCode: string;
 }
 
 export interface SessionResponse {
   sessionId: string;
   publicCode: string;
+  pairingCode: string | null;
+  phoneNumber: string;
   status: 'connecting' | 'connected' | 'disconnected';
-  qr: string | null;
   createdAt: string;
 }
 
-export const createSession = async (): Promise<CreateSessionResponse> => {
-  const response = await fetch(buildUrl('/session/create'), {
+export interface SessionStatusResponse {
+  status: SessionResponse['status'];
+}
+
+export const createPairSession = async (number: string): Promise<PairSessionResponse> => {
+  const response = await fetch(buildUrl('/session/pair'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
+    body: JSON.stringify({ number }),
   });
 
   if (!response.ok) {
-    throw new Error('Unable to create session');
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error || 'Unable to generate pairing code');
   }
 
-  return response.json() as Promise<CreateSessionResponse>;
+  return response.json() as Promise<PairSessionResponse>;
 };
 
-export const fetchSessionQr = async (sessionId: string): Promise<SessionResponse> => {
-  const response = await fetch(buildUrl(`/session/${sessionId}/qr`), {
+export const fetchSession = async (sessionId: string): Promise<SessionResponse> => {
+  const response = await fetch(buildUrl(`/session/${sessionId}`), {
     method: 'GET',
     cache: 'no-store',
   });
 
   if (!response.ok) {
-    throw new Error('Unable to fetch session QR');
+    throw new Error('Unable to fetch session');
   }
 
   return response.json() as Promise<SessionResponse>;
 };
 
-export const fetchSessionStatus = async (sessionId: string): Promise<SessionResponse> => {
+export const fetchSessionStatus = async (sessionId: string): Promise<SessionStatusResponse> => {
   const response = await fetch(buildUrl(`/session/${sessionId}/status`), {
     method: 'GET',
     cache: 'no-store',
@@ -61,7 +67,7 @@ export const fetchSessionStatus = async (sessionId: string): Promise<SessionResp
     throw new Error('Unable to fetch session status');
   }
 
-  return response.json() as Promise<SessionResponse>;
+  return response.json() as Promise<SessionStatusResponse>;
 };
 
 export const deleteSession = async (sessionId: string): Promise<void> => {
