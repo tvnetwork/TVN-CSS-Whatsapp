@@ -7,9 +7,13 @@ import { logger } from './utils/logger';
 const app = express();
 const port = Number(process.env.PORT || 3000);
 
-app.use(cors({
-  origin: '*',
-}));
+app.use(
+  cors({
+    origin: '*',
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type'],
+  }),
+);
 app.use(express.json({ limit: '1mb' }));
 app.use(apiRouter);
 

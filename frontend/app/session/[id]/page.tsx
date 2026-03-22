@@ -4,7 +4,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
 
   return (
-    <main className="page-shell">
+    <main className="flex min-h-screen items-center justify-center bg-hero-gradient px-4 py-10">
       <SessionDashboard sessionId={id} />
     </main>
   );

@@ -23,7 +23,6 @@ export interface SessionRecord {
   phoneNumber: string;
   authState: CustomAuthState;
   socket: any | null;
-  qr: string | null;
   pairingCode: string | null;
   status: SessionStatus;
   createdAt: string;
