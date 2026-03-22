@@ -1,0 +1,25 @@
+{
+  "name": "tvn-css-whatsapp",
+  "version": "1.0.0",
+  "description": "Production-ready multi-session WhatsApp automation platform built with Baileys and Express",
+  "main": "dist/server/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server/index.js",
+    "dev": "tsx watch server/index.ts"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.19",
+    "express": "^4.21.2",
+    "nanoid": "^5.1.5",
+    "pino": "^9.7.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
