@@ -3,7 +3,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   jidNormalizedUser,
-} from 'baileys';
+} from '@whiskeysockets/baileys';
 import Boom from '@hapi/boom';
 
 import { sessionManager } from '../sessions/session-manager';

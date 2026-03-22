@@ -1,4 +1,4 @@
-import { BufferJSON, initAuthCreds } from 'baileys';
+import { BufferJSON, initAuthCreds } from '@whiskeysockets/baileys';
 
 import type { CustomAuthState, InMemoryAuthStorage } from './types';
 

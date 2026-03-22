@@ -18,7 +18,7 @@ declare module '@hapi/boom' {
   export default Boom;
 }
 
-declare module 'baileys' {
+declare module '@whiskeysockets/baileys' {
   const makeWASocket: any;
   export const Browsers: any;
   export const DisconnectReason: any;
