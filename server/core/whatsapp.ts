@@ -1,52 +1,85 @@
 const baileys = require('@whiskeysockets/baileys');
 
 import type { SessionRecord } from '../sessions/types';
-import { serializeAuthState } from '../sessions/auth-state';
 import { sessionManager } from '../sessions/session-manager';
 import { normalizePhoneNumber } from '../utils/phone';
 import { logger } from '../utils/logger';
 
 const makeWASocket = baileys.default;
-const jidNormalizedUser = baileys.jidNormalizedUser;
+const sessions: Record<string, { sock: any }> = {};
 
-const sendConnectionMessage = async (sessionId: string): Promise<void> => {
-  const session = sessionManager.getSession(sessionId);
-  if (!session?.socket?.user?.id) {
+const startBot = (sock: any, sessionId: string): void => {
+  if (sock.__tvnBotStarted) {
     return;
   }
 
-  const jid = jidNormalizedUser(session.socket.user.id);
-  const sessionString = session.sessionString ?? serializeAuthState(session.authState);
+  sock.__tvnBotStarted = true;
+  sessions[sessionId] = {
+    sock,
+  };
 
-  sessionManager.updateSession(sessionId, {
-    sessionString,
-    sessionDeliveredAt: new Date().toISOString(),
-  });
+  sock.ev.on('messages.upsert', async ({ messages }: { messages?: any[] }) => {
+    try {
+      const msg = messages?.[0];
+      if (!msg?.message) {
+        return;
+      }
 
-  await session.socket.sendMessage(jid, {
-    text: `TVN-CSS:~${sessionString}`,
-  });
+      if (msg.key?.fromMe) {
+        return;
+      }
 
-  await session.socket.sendMessage(jid, {
-    text: `🟢 Session verified successfully!
+      const jid = msg.key?.remoteJid;
+      if (!jid) {
+        return;
+      }
 
-TYPE: BASE64
-STATUS: Active and Working ✅`,
+      const text =
+        msg.message.conversation ||
+        msg.message.extendedTextMessage?.text ||
+        '';
+
+      if (!text || !text.startsWith('.')) {
+        return;
+      }
+
+      if (text === '.menu' || text === '.help') {
+        await sock.sendMessage(jid, {
+          text: `📌 TVN MENU
+
+.start
+.menu
+.help
+.ping`,
+        });
+        return;
+      }
+
+      if (text === '.start') {
+        await sock.sendMessage(jid, {
+          text: '👋 Welcome to TVN Bot',
+        });
+        return;
+      }
+
+      if (text === '.ping') {
+        await sock.sendMessage(jid, {
+          text: '🏓 Pong!',
+        });
+      }
+    } catch (error) {
+      logger.error({ err: error, sessionId }, 'Failed while handling bot command');
+    }
   });
 };
 
 const attachConnectionHandlers = (sessionId: string, sock: any, saveCreds: () => Promise<void>): void => {
   sock.ev.on('creds.update', async () => {
-    await saveCreds();
-
-    const session = sessionManager.getSession(sessionId);
-    if (!session) {
-      return;
+    try {
+      await saveCreds();
+    } catch (error) {
+      logger.error({ err: error, sessionId }, 'Failed while saving credentials');
     }
-
-    sessionManager.updateSession(sessionId, {
-      sessionString: serializeAuthState(session.authState),
-    });
   });
 
   sock.ev.on('connection.update', async (update: any) => {
@@ -54,19 +87,24 @@ const attachConnectionHandlers = (sessionId: string, sock: any, saveCreds: () =>
       const connection = update?.connection;
 
       if (connection === 'open') {
-        const session = sessionManager.getSession(sessionId);
-        const sessionString = session ? serializeAuthState(session.authState) : null;
-
         sessionManager.updateSession(sessionId, {
           status: 'connected',
           socket: sock,
-          sessionString,
         });
 
-        if (session && !session.sessionDeliveredAt) {
-          await sendConnectionMessage(sessionId);
-        }
+        sessions[sessionId] = {
+          sock,
+        };
 
+        await sock.sendMessage(sock.user.id, {
+          text: `🚀 TVN Bot Activated
+
+Status: Connected ✅
+
+Type .menu to begin`,
+        });
+
+        startBot(sock, sessionId);
         return;
       }
 
@@ -75,6 +113,10 @@ const attachConnectionHandlers = (sessionId: string, sock: any, saveCreds: () =>
           status: 'disconnected',
           socket: null,
         });
+
+        if (sessions[sessionId]?.sock === sock) {
+          delete sessions[sessionId];
+        }
       }
     } catch (error) {
       logger.error({ err: error, sessionId }, 'Failed while handling connection update');

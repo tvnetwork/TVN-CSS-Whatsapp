@@ -1,7 +1,4 @@
 declare const require: (name: string) => any;
-declare const Buffer: {
-  from: (value: string) => { toString: (encoding: string) => string };
-};
 declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): any;
 declare function clearTimeout(timeoutId: any): void;
 

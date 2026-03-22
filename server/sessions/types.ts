@@ -22,8 +22,6 @@ export interface SessionRecord {
   publicCode: string;
   phoneNumber: string;
   authState: CustomAuthState;
-  sessionString: string | null;
-  sessionDeliveredAt: string | null;
   socket: any | null;
   pairingCode: string | null;
   status: SessionStatus;
