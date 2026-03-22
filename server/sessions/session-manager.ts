@@ -1,7 +1,7 @@
-import { createPublicCode, createSessionId } from '../utils/id';
-import { logger } from '../utils/logger';
 import { createInMemoryAuthState } from './auth-state';
 import type { SessionRecord, SessionStatus } from './types';
+import { createPublicCode, createSessionId } from '../utils/id';
+import { logger } from '../utils/logger';
 
 class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
@@ -18,7 +18,7 @@ class SessionManager {
       publicCode = createPublicCode();
     }
 
-    const record: SessionRecord = {
+    const session: SessionRecord = {
       sessionId,
       publicCode,
       authState: createInMemoryAuthState(),
@@ -28,27 +28,27 @@ class SessionManager {
       createdAt: new Date().toISOString(),
     };
 
-    this.sessions.set(sessionId, record);
+    this.sessions.set(sessionId, session);
     this.publicCodes.add(publicCode);
 
     logger.info({ sessionId, publicCode }, 'Session created');
 
-    return record;
+    return session;
   }
 
   getSession(sessionId: string): SessionRecord | undefined {
     return this.sessions.get(sessionId);
   }
 
-  updateSession(sessionId: string, patch: Partial<SessionRecord>): SessionRecord | undefined {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
+  updateSession(sessionId: string, updates: Partial<SessionRecord>): SessionRecord | undefined {
+    const current = this.sessions.get(sessionId);
+    if (!current) {
       return undefined;
     }
 
-    const nextSession = { ...session, ...patch };
-    this.sessions.set(sessionId, nextSession);
-    return nextSession;
+    const next = { ...current, ...updates };
+    this.sessions.set(sessionId, next);
+    return next;
   }
 
   setStatus(sessionId: string, status: SessionStatus): SessionRecord | undefined {
@@ -65,9 +65,11 @@ class SessionManager {
       try {
         session.socket.ev.removeAllListeners('connection.update');
         session.socket.ev.removeAllListeners('creds.update');
-        session.socket.end(new Error('Session deleted'));
+        if (typeof session.socket.end === 'function') {
+          session.socket.end(new Error('Session deleted'));
+        }
       } catch (error) {
-        logger.warn({ err: error, sessionId }, 'Failed while closing socket during delete');
+        logger.warn({ err: error, sessionId }, 'Failed to shut down socket while deleting session');
       }
     }
 
@@ -76,10 +78,6 @@ class SessionManager {
     logger.info({ sessionId }, 'Session deleted');
 
     return true;
-  }
-
-  listSessions(): SessionRecord[] {
-    return [...this.sessions.values()];
   }
 }
 
