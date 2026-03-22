@@ -186,13 +186,6 @@ Type .menu to begin`,
 const buildSocket = (session: SessionRecord): any => {
   const state = session.authState.state;
 
-  if (!state.creds.registered && !state.creds.me) {
-    state.creds.me = {
-      id: `${session.phoneNumber}@s.whatsapp.net`,
-      name: '~',
-    };
-  }
-
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
