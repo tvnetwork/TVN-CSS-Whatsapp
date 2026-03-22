@@ -1,6 +1,7 @@
 const baileys = require('@whiskeysockets/baileys');
 
 import type { SessionRecord } from '../sessions/types';
+import { serializeAuthState } from '../sessions/auth-state';
 import { sessionManager } from '../sessions/session-manager';
 import { normalizePhoneNumber } from '../utils/phone';
 import { logger } from '../utils/logger';
@@ -15,24 +16,57 @@ const sendConnectionMessage = async (sessionId: string): Promise<void> => {
   }
 
   const jid = jidNormalizedUser(session.socket.user.id);
+  const sessionString = session.sessionString ?? serializeAuthState(session.authState);
+
+  sessionManager.updateSession(sessionId, {
+    sessionString,
+    sessionDeliveredAt: new Date().toISOString(),
+  });
+
   await session.socket.sendMessage(jid, {
-    text: '✅ TVN Connected Successfully',
+    text: `TVN-CSS:~${sessionString}`,
+  });
+
+  await session.socket.sendMessage(jid, {
+    text: `🟢 Session verified successfully!
+
+TYPE: BASE64
+STATUS: Active and Working ✅`,
   });
 };
 
 const attachConnectionHandlers = (sessionId: string, sock: any, saveCreds: () => Promise<void>): void => {
-  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('creds.update', async () => {
+    await saveCreds();
+
+    const session = sessionManager.getSession(sessionId);
+    if (!session) {
+      return;
+    }
+
+    sessionManager.updateSession(sessionId, {
+      sessionString: serializeAuthState(session.authState),
+    });
+  });
 
   sock.ev.on('connection.update', async (update: any) => {
     try {
       const connection = update?.connection;
 
       if (connection === 'open') {
+        const session = sessionManager.getSession(sessionId);
+        const sessionString = session ? serializeAuthState(session.authState) : null;
+
         sessionManager.updateSession(sessionId, {
           status: 'connected',
           socket: sock,
+          sessionString,
         });
-        await sendConnectionMessage(sessionId);
+
+        if (session && !session.sessionDeliveredAt) {
+          await sendConnectionMessage(sessionId);
+        }
+
         return;
       }
 
@@ -76,8 +110,6 @@ export const startPairingSession = async (rawNumber: string): Promise<SessionRec
     });
 
     const pairingCode = await sock.requestPairingCode(number);
-    console.log('✅ Pairing Code:', pairingCode);
-
     const nextSession = sessionManager.updateSession(session.sessionId, {
       pairingCode,
       socket: sock,

@@ -23,6 +23,8 @@ class SessionManager {
       publicCode,
       phoneNumber,
       authState: createInMemoryAuthState(),
+      sessionString: null,
+      sessionDeliveredAt: null,
       socket: null,
       pairingCode: null,
       status: 'connecting',

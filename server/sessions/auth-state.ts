@@ -59,3 +59,15 @@ export const createInMemoryAuthState = (
     },
   };
 };
+
+export const serializeAuthState = (authState: CustomAuthState): string => {
+  const sessionData = JSON.stringify(
+    {
+      creds: cloneData(authState.storage.creds),
+      keys: cloneData(authState.storage.keys),
+    },
+    BufferJSON.replacer,
+  );
+
+  return Buffer.from(sessionData).toString('base64');
+};
