@@ -1,34 +1,37 @@
+declare const require: (name: string) => any;
+declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): any;
+declare function clearTimeout(timeoutId: any): void;
+
+declare const process: {
+  env: Record<string, string | undefined>;
+  exit: (code?: number) => never;
+};
+
+declare namespace NodeJS {
+  type Timeout = any;
+}
+
 declare module 'express' {
   const express: any;
   export const Router: any;
-  export default express;
+  export = express;
 }
 
 declare module 'pino' {
   const pino: any;
-  export default pino;
+  export = pino;
 }
 
 declare module 'nanoid' {
   export const customAlphabet: (alphabet: string, size: number) => () => string;
 }
 
-declare module '@hapi/boom' {
-  const Boom: any;
-  export default Boom;
-}
-
 declare module '@whiskeysockets/baileys' {
-  const makeWASocket: any;
-  export const Browsers: any;
-  export const DisconnectReason: any;
-  export const fetchLatestBaileysVersion: any;
-  export const jidNormalizedUser: any;
-  export const BufferJSON: any;
-  export const initAuthCreds: any;
-  export default makeWASocket;
+  const baileys: any;
+  export = baileys;
 }
 
-declare const process: {
-  env: Record<string, string | undefined>;
-};
+declare module '@hapi/boom' {
+  const boom: any;
+  export = boom;
+}

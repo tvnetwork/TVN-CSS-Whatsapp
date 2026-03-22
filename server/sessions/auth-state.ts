@@ -1,28 +1,32 @@
-import { BufferJSON, initAuthCreds } from '@whiskeysockets/baileys';
+const baileys = require('@whiskeysockets/baileys');
 
 import type { CustomAuthState, InMemoryAuthStorage } from './types';
 
-const readData = <T>(value: unknown): T => JSON.parse(JSON.stringify(value, BufferJSON.replacer), BufferJSON.reviver) as T;
+const BufferJSON = baileys.BufferJSON;
+const initAuthCreds = baileys.initAuthCreds;
+
+const cloneData = <T>(value: unknown): T => {
+  return JSON.parse(JSON.stringify(value, BufferJSON.replacer), BufferJSON.reviver) as T;
+};
 
 export const createInMemoryAuthState = (
   initialStorage?: Partial<InMemoryAuthStorage>,
 ): CustomAuthState => {
   const storage: InMemoryAuthStorage = {
-    creds: initialStorage?.creds ? readData(initialStorage.creds) : initAuthCreds(),
-    keys: initialStorage?.keys ? readData(initialStorage.keys) : {},
+    creds: initialStorage?.creds ? cloneData(initialStorage.creds) : initAuthCreds(),
+    keys: initialStorage?.keys ? cloneData(initialStorage.keys) : {},
   };
 
   const state = {
     creds: storage.creds,
     keys: {
       get: async (type: string, ids: string[]) => {
-        const keyStore = storage.keys[type] || {};
+        const categoryStore = storage.keys[type] || {};
         const data: Record<string, unknown> = {};
 
         for (const id of ids) {
-          const value = keyStore[id];
-          if (value) {
-            data[id] = readData(value);
+          if (categoryStore[id]) {
+            data[id] = cloneData(categoryStore[id]);
           }
         }
 
@@ -33,15 +37,11 @@ export const createInMemoryAuthState = (
           storage.keys[category] = storage.keys[category] || {};
           const categoryData = data[category];
 
-          if (!categoryData) {
-            continue;
-          }
-
-          for (const id of Object.keys(categoryData)) {
+          for (const id of Object.keys(categoryData || {})) {
             const value = categoryData[id];
 
             if (value) {
-              storage.keys[category][id] = readData(value);
+              storage.keys[category][id] = cloneData(value);
             } else {
               delete storage.keys[category][id];
             }
@@ -55,7 +55,7 @@ export const createInMemoryAuthState = (
     state,
     storage,
     saveCreds: async () => {
-      storage.creds = readData(state.creds);
+      storage.creds = cloneData(state.creds);
     },
   };
 };

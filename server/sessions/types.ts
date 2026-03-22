@@ -21,7 +21,7 @@ export interface SessionRecord {
   sessionId: string;
   publicCode: string;
   authState: CustomAuthState;
-  socket: any;
+  socket: any | null;
   qr: string | null;
   status: SessionStatus;
   createdAt: string;

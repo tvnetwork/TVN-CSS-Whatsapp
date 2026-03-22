@@ -1,21 +1,19 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2020",
     "module": "CommonJS",
     "moduleResolution": "Node",
     "outDir": "dist",
     "rootDir": ".",
     "strict": true,
-    "esModuleInterop": true,
+    "esModuleInterop": false,
+    "allowSyntheticDefaultImports": false,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "lib": [
-      "ES2022",
-      "DOM"
-    ]
+    "lib": ["ES2020"],
+    "noEmitOnError": true
   },
-  "include": [
-    "server/**/*.ts"
-  ]
+  "include": ["server/**/*.ts"],
+  "exclude": ["frontend", "dist", "node_modules"]
 }
