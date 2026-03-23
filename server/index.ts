@@ -5,7 +5,7 @@ import { apiRouter } from './api/routes';
 import { logger } from './utils/logger';
 
 const app = express();
-const port = Number(process.env.PORT || 3000);
+const PORT = process.env.PORT || 3000;
 
 app.use(
   cors({
@@ -28,15 +28,7 @@ app.use((error: unknown, _req: any, res: any, _next: any) => {
   res.status(500).json({ error: message });
 });
 
-const bootstrap = async (): Promise<void> => {
-  try {
-    app.listen(port, () => {
-      logger.info({ port }, 'TVN WhatsApp Engine started');
-    });
-  } catch (error) {
-    logger.fatal({ err: error }, 'Failed to bootstrap server');
-    process.exit(1);
-  }
-};
-
-void bootstrap();
+app.listen(PORT, () => {
+  console.log('Server running on port', PORT);
+  logger.info({ port: Number(PORT) }, 'TVN WhatsApp Engine started');
+});

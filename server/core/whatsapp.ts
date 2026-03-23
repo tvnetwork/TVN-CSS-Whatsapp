@@ -1,4 +1,5 @@
 const baileys = require('@whiskeysockets/baileys');
+import pino = require('pino');
 
 import type { SessionRecord } from '../sessions/types';
 import { sessionManager } from '../sessions/session-manager';
@@ -6,52 +7,16 @@ import { normalizePhoneNumber } from '../utils/phone';
 import { logger } from '../utils/logger';
 
 const makeWASocket = baileys.default;
+const Browsers = baileys.Browsers;
 const sessions: Record<string, { sock: any }> = {};
+const PAIRING_CODE_POLL_INTERVAL_MS = 300;
 
-const removeWsListener = (sock: any, event: string, listener: (...args: any[]) => void): void => {
-  if (typeof sock.ws?.off === 'function') {
-    sock.ws.off(event, listener);
-    return;
-  }
-
-  if (typeof sock.ws?.removeListener === 'function') {
-    sock.ws.removeListener(event, listener);
-  }
+const sleep = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 };
 
-const waitForSocketOpen = async (sock: any): Promise<void> => {
-  if (sock.ws?.readyState === 1) {
-    console.log('✅ WebSocket opened');
-    return;
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const handleOpen = () => {
-      removeWsListener(sock, 'open', handleOpen);
-      removeWsListener(sock, 'close', handleClose);
-      removeWsListener(sock, 'error', handleError);
-      console.log('✅ WebSocket opened');
-      resolve();
-    };
-
-    const handleClose = () => {
-      removeWsListener(sock, 'open', handleOpen);
-      removeWsListener(sock, 'close', handleClose);
-      removeWsListener(sock, 'error', handleError);
-      reject(new Error('WebSocket closed before pairing initialization completed'));
-    };
-
-    const handleError = (error: unknown) => {
-      removeWsListener(sock, 'open', handleOpen);
-      removeWsListener(sock, 'close', handleClose);
-      removeWsListener(sock, 'error', handleError);
-      reject(error instanceof Error ? error : new Error('WebSocket error before pairing initialization'));
-    };
-
-    sock.ws.on('open', handleOpen);
-    sock.ws.on('close', handleClose);
-    sock.ws.on('error', handleError);
-  });
+const isRegistered = (state: SessionRecord['authState']['state']): boolean => {
+  return Boolean((state.creds as { registered?: boolean }).registered);
 };
 
 const startBot = (sock: any, sessionId: string): void => {
@@ -67,11 +32,7 @@ const startBot = (sock: any, sessionId: string): void => {
   sock.ev.on('messages.upsert', async ({ messages }: { messages?: any[] }) => {
     try {
       const msg = messages?.[0];
-      if (!msg?.message) {
-        return;
-      }
-
-      if (msg.key?.fromMe) {
+      if (!msg?.message || msg.key?.fromMe) {
         return;
       }
 
@@ -80,11 +41,7 @@ const startBot = (sock: any, sessionId: string): void => {
         return;
       }
 
-      const text =
-        msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        '';
-
+      const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
       if (!text || !text.startsWith('.')) {
         return;
       }
@@ -119,8 +76,20 @@ const startBot = (sock: any, sessionId: string): void => {
   });
 };
 
-const attachConnectionHandlers = (sessionId: string, sock: any, saveCreds: () => Promise<void>): void => {
-  let isAlive = true;
+const attachConnectionHandlers = ({
+  sessionId,
+  phoneNumber,
+  sock,
+  state,
+  saveCreds,
+}: {
+  sessionId: string;
+  phoneNumber: string;
+  sock: any;
+  state: SessionRecord['authState']['state'];
+  saveCreds: () => Promise<void>;
+}): void => {
+  let pairingRequested = false;
 
   sock.ev.on('creds.update', async () => {
     try {
@@ -131,112 +100,115 @@ const attachConnectionHandlers = (sessionId: string, sock: any, saveCreds: () =>
   });
 
   sock.ev.on('connection.update', async (update: any) => {
-    try {
-      console.log('🔄 Connection update:', JSON.stringify(update, null, 2));
+    const { connection, qr, lastDisconnect } = update || {};
 
-      const connection = update?.connection;
+    console.log('🔄 connection.update:', JSON.stringify(update, null, 2));
 
-      if (connection === 'open') {
-        console.log('🎉 Connected successfully');
-        isAlive = true;
+    if ((connection === 'connecting' || Boolean(qr)) && !pairingRequested && !isRegistered(state)) {
+      pairingRequested = true;
+
+      try {
+        const pairingCode = await sock.requestPairingCode(phoneNumber);
+        console.log('✅ Pairing Code:', pairingCode);
 
         sessionManager.updateSession(sessionId, {
-          status: 'connected',
+          pairingCode,
           socket: sock,
+          status: 'connecting',
         });
+      } catch (error) {
+        console.error('❌ Pairing error:', error);
+        logger.error({ err: error, sessionId }, 'Failed to request pairing code');
+      }
+    }
 
-        sessions[sessionId] = {
-          sock,
-        };
+    if (connection === 'open') {
+      console.log('🎉 Connected successfully');
 
-        await sock.sendMessage(sock.user.id, {
-          text: `🚀 TVN Bot Activated
+      sessionManager.updateSession(sessionId, {
+        status: 'connected',
+        socket: sock,
+      });
+
+      sessions[sessionId] = {
+        sock,
+      };
+
+      await sock.sendMessage(sock.user.id, {
+        text: `🚀 TVN Bot Activated
 
 Status: Connected ✅
 
 Type .menu to begin`,
-        });
-
-        startBot(sock, sessionId);
-        return;
-      }
-
-      if (connection === 'close') {
-        console.log('❌ Connection closed');
-        isAlive = false;
-
-        sessionManager.updateSession(sessionId, {
-          status: 'disconnected',
-          socket: null,
-        });
-
-        if (sessions[sessionId]?.sock === sock) {
-          delete sessions[sessionId];
-        }
-      }
-    } catch (error) {
-      logger.error({ err: error, sessionId }, 'Failed while handling connection update');
-      sessionManager.updateSession(sessionId, {
-        status: isAlive ? 'connecting' : 'disconnected',
       });
+
+      startBot(sock, sessionId);
+      return;
+    }
+
+    if (connection === 'close') {
+      console.log('❌ Connection closed:', JSON.stringify(lastDisconnect, null, 2));
+
+      sessionManager.updateSession(sessionId, {
+        status: 'disconnected',
+        socket: null,
+      });
+
+      if (sessions[sessionId]?.sock === sock) {
+        delete sessions[sessionId];
+      }
     }
   });
 };
 
 const buildSocket = (session: SessionRecord): any => {
   const state = session.authState.state;
-
-  if (!state.creds.registered && !state.creds.me) {
-    state.creds.me = {
-      id: `${session.phoneNumber}@s.whatsapp.net`,
-      name: '~',
-    };
-  }
-
   const sock = makeWASocket({
     auth: state,
+    logger: pino({ level: 'debug' }),
     printQRInTerminal: false,
-    browser: ['TVN', 'Chrome', '1.0.0'],
+    browser: Browsers.macOS('Google Chrome'),
+    keepAliveIntervalMs: 30000,
     syncFullHistory: false,
   });
 
-  attachConnectionHandlers(session.sessionId, sock, session.authState.saveCreds);
+  attachConnectionHandlers({
+    sessionId: session.sessionId,
+    phoneNumber: session.phoneNumber,
+    sock,
+    state,
+    saveCreds: session.authState.saveCreds,
+  });
+
   return sock;
 };
 
 export const startPairingSession = async (rawNumber: string): Promise<SessionRecord> => {
-  const number = normalizePhoneNumber(rawNumber);
-  const session = sessionManager.createSession(number);
+  const number = String(rawNumber || '').replace(/\D/g, '');
+  const normalizedNumber = normalizePhoneNumber(number);
+  const session = sessionManager.createSession(normalizedNumber);
+  const sock = buildSocket(session);
 
-  try {
-    const sock = buildSocket(session);
-    sessionManager.updateSession(session.sessionId, {
-      socket: sock,
-      status: 'connecting',
-    });
+  sessionManager.updateSession(session.sessionId, {
+    socket: sock,
+    status: 'connecting',
+  });
 
-    await waitForSocketOpen(sock);
+  while (true) {
+    const currentSession = sessionManager.getSession(session.sessionId);
 
-    const pairingCode = await sock.requestPairingCode(number);
-    console.log('✅ Pairing Code:', pairingCode);
-
-    const nextSession = sessionManager.updateSession(session.sessionId, {
-      pairingCode,
-      socket: sock,
-      status: 'connecting',
-    });
-
-    if (!nextSession) {
-      throw new Error('Unable to store session');
+    if (!currentSession) {
+      throw new Error('Session not found');
     }
 
-    return nextSession;
-  } catch (error) {
-    logger.error({ err: error, sessionId: session.sessionId }, 'Pairing session failed');
-    sessionManager.updateSession(session.sessionId, {
-      status: 'disconnected',
-      socket: null,
-    });
-    throw error;
+    if (currentSession.pairingCode) {
+      return currentSession;
+    }
+
+    if (currentSession.status === 'disconnected') {
+      throw new Error('Connection closed before pairing code was issued');
+    }
+
+    await sleep(PAIRING_CODE_POLL_INTERVAL_MS);
   }
 };
