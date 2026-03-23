@@ -168,6 +168,7 @@ const buildSocket = (session: SessionRecord): any => {
     logger: pino({ level: 'debug' }),
     printQRInTerminal: false,
     browser: Browsers.macOS('Google Chrome'),
+    keepAliveIntervalMs: 30000,
     syncFullHistory: false,
   });
 
